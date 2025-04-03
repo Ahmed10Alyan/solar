@@ -1,0 +1,59 @@
+/* تنسيق عام */
+body {
+    background-color: #f8f9fa;
+    font-family: Arial, sans-serif;
+}
+
+/* تنسيق الحاوية */
+.container {
+    max-width: 600px;
+    margin: 50px auto;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* تنسيق الأزرار */
+.btn-custom {
+    background-color: #007bff;
+    color: white;
+    transition: 0.3s;
+}
+
+.btn-custom:hover {
+    background-color: #0056b3;
+}
+
+/* تحسين إدخال البيانات */
+input.form-control {
+    border-radius: 5px;
+    border: 1px solid #ced4da;
+    padding: 10px;
+}
+
+/* تأثير تحميل النتائج */
+.loading {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.8);
+    text-align: center;
+    padding-top: 20%;
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #007bff;
+}
+
+/* تحسين جدول النتائج */
+.heatmap td {
+    text-align: center;
+    font-weight: bold;
+}
+
+.low { background-color: #c3e6cb; } /* أخضر */
+.medium { background-color: #ffeeba; } /* أصفر */
+.high { background-color: #f5c6cb; } /* أحمر */

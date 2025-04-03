@@ -1,0 +1,353 @@
+دلوقتي بقا عندي فيل اسمه project في 
+app.py
+templates
+static
+جوه ال templates في 
+index.html
+result.html
+و جوه ال static في 
+style.css
+
+app.py
+from flask import Flask, render_template, request
+import pandas as pd
+import numpy as np
+import pvlib
+import plotly.express as px
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+
+# قائمة أنواع البطاريات وكفاءتها (متوسط القيم)
+BATTERY_TYPES = {
+    "Lead Acid": 85,
+    "Lithium-ion": 95,
+    "Nickel-Cadmium": 75,
+    "Solid-State": 98
+}
+
+# دالة لحساب زاوية الميل المثلى
+def optimal_tilt_angle(latitude, season="yearly"):
+    if season == "summer":
+        return latitude - 10
+    elif season == "winter":
+        return latitude + 10
+    else:
+        return latitude
+
+# حساب الإشعاع الشمسي والطاقة المخزنة
+def calculate_radiation(latitude, longitude, tilt_angle, altitude, date, efficiency, panel_area, battery_type):
+    start_time = datetime.strptime(date, "%Y-%m-%d") + timedelta(hours=6)
+    end_time = datetime.strptime(date, "%Y-%m-%d") + timedelta(hours=18)
+    time_range = pd.date_range(start=start_time, end=end_time, freq='H', tz="UTC")
+
+    location = pvlib.location.Location(latitude, longitude, altitude=altitude)
+    solar_position = location.get_solarposition(time_range)
+    clearsky = location.get_clearsky(time_range)
+
+    dni_extra = pvlib.irradiance.get_extra_radiation(time_range)
+    beam_radiation = clearsky['dni']
+    diffuse_radiation = clearsky['dhi']
+    global_radiation = clearsky['ghi']
+    reflected_radiation = 0.2 * global_radiation
+    total_radiation = beam_radiation + diffuse_radiation + reflected_radiation
+
+    panel_output = (total_radiation * efficiency * panel_area) / 100
+    energy_generated = panel_output.sum()
+
+    # تحديد كفاءة البطارية حسب النوع
+    battery_efficiency = BATTERY_TYPES.get(battery_type, 85)
+    energy_stored = energy_generated * (battery_efficiency / 100)
+
+    results = pd.DataFrame({
+        "Time": time_range.strftime("%H:%M"),
+        "Beam Radiation (W/m²)": beam_radiation.values,
+        "Diffuse Radiation (W/m²)": diffuse_radiation.values,
+        "Reflected Radiation (W/m²)": reflected_radiation.values,
+        "Total Radiation (W/m²)": total_radiation.values,
+        "Panel Output (W)": panel_output.values
+    })
+
+    fig = px.line(results, x="Time", y=["Beam Radiation (W/m²)", "Diffuse Radiation (W/m²)", "Reflected Radiation (W/m²)", "Total Radiation (W/m²)"])
+    fig.update_layout(title="Solar Radiation Throughout the Day", xaxis_title="Time", yaxis_title="Radiation (W/m²)")
+    graph_html = fig.to_html(full_html=False)
+    
+    return results, graph_html, energy_generated, energy_stored, battery_efficiency
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        try:
+            latitude = float(request.form.get("latitude", 0) or 0)
+            longitude = float(request.form.get("longitude", 0) or 0)
+            altitude = float(request.form.get("altitude", 0) or 0)
+            date = request.form.get("date", "2024-01-01")  
+            efficiency = float(request.form.get("efficiency", 0) or 0)
+            panel_area = float(request.form.get("panel_area", 1) or 1)
+
+            season = request.form.get("season", "yearly")
+            tilt_angle = float(request.form.get("tilt_angle") or optimal_tilt_angle(latitude, season))
+
+            battery_type = request.form.get("battery_type", "Lead Acid")
+
+            results, graph_html, energy_generated, energy_stored, battery_efficiency = calculate_radiation(
+                latitude, longitude, tilt_angle, altitude, date, efficiency, panel_area, battery_type
+            )
+            
+            return render_template("result.html", results=results.to_html(classes="table table-striped"),
+                                   graph_html=graph_html, energy_generated=energy_generated, energy_stored=energy_stored,
+                                   tilt_angle=tilt_angle, battery_type=battery_type, battery_efficiency=battery_efficiency)
+        except ValueError as e:
+            return f"خطأ في إدخال البيانات: {str(e)}"
+    
+    return render_template("index.html", battery_types=BATTERY_TYPES.keys())
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Radiation Calculator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 600px;
+            margin-top: 50px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .btn-custom {
+            background-color: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2 class="text-center">Solar Radiation Calculator</h2>
+        <form method="POST" action="/">
+            <div class="mb-3">
+                <label class="form-label">Latitude</label>
+                <input type="text" class="form-control" name="latitude" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Longitude</label>
+                <input type="text" class="form-control" name="longitude" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Altitude</label>
+                <input type="text" class="form-control" name="altitude" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Tilt Angle (Optional)</label>
+                <input type="text" class="form-control" name="tilt_angle">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Season for Optimal Tilt</label>
+                <select class="form-control" name="season">
+                    <option value="yearly">Yearly</option>
+                    <option value="summer">Summer</option>
+                    <option value="winter">Winter</option>
+                </select>
+            </div>            
+            <div class="mb-3">
+                <label class="form-label">Date</label>
+                <input type="date" class="form-control" name="date" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Panel Efficiency (%)</label>
+                <input type="text" class="form-control" name="efficiency" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Panel Area (m²)</label>
+                <input type="text" class="form-control" name="panel_area" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Battery Type</label>
+                <select class="form-control" name="battery_type">
+                    {% for battery in battery_types %}
+                        <option value="{{ battery }}">{{ battery }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+                       
+            <button type="submit" class="btn btn-custom w-100">Calculate</button>
+        </form>
+    </div>
+</body>
+</html>
+
+result.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Radiation Results</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 800px;
+            margin-top: 50px;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .btn-custom {
+            background-color: #007bff;
+            color: white;
+        }
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            text-align: center;
+            padding-top: 20%;
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .heatmap td {
+            text-align: center;
+            font-weight: bold;
+        }
+        .low { background-color: #c3e6cb; } /* Green */
+        .medium { background-color: #ffeeba; } /* Yellow */
+        .high { background-color: #f5c6cb; } /* Red */
+    </style>
+</head>
+<body>
+    <div class="loading">Loading results...</div>
+    <div class="container">
+        <h2 class="text-center">Solar Radiation Results</h2>
+        <div class="mt-4">
+            <h4>Radiation Data:</h4>
+            <table class="table table-striped heatmap">
+                {{ results | safe }}
+            </table>
+        </div>
+        <div class="mt-4">
+            <h4>Radiation Chart:</h4>
+            {{ graph_html | safe }}
+        </div>
+        <div class="mt-4">
+            <h4>Calculated Tilt Angle:</h4>
+            <p><strong>Optimal Tilt Angle:</strong> {{ tilt_angle|round(2) }}°</p>
+        </div>  
+        <div class="mt-4">
+            <h4>Battery Details:</h4>
+            <p><strong>Battery Type:</strong> {{ battery_type }}</p>
+            <p><strong>Battery Efficiency:</strong> {{ battery_efficiency }}%</p>
+        </div>              
+        <div class="mt-4">
+            <h4>Energy Summary:</h4>
+            <p><strong>Total Energy Generated:</strong> {{ energy_generated|round(2) }} Wh</p>
+            <p><strong>Energy Stored in Battery:</strong> {{ energy_stored|round(2) }} Wh</p>
+        </div>        
+        <div class="text-center mt-4">
+            <a href="/" class="btn btn-custom">Back to Input</a>
+        </div>
+    </div>
+    <script>
+        $(document).ready(function() {
+            $(".loading").fadeIn(500).delay(1000).fadeOut(500);
+            $(".heatmap tr").each(function() {
+                $(this).find("td").each(function() {
+                    let value = parseFloat($(this).text());
+                    if (!isNaN(value)) {
+                        if (value < 200) {
+                            $(this).addClass("low");
+                        } else if (value < 500) {
+                            $(this).addClass("medium");
+                        } else {
+                            $(this).addClass("high");
+                        }
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
+
+
+style.css
+/* تنسيق عام */
+body {
+    background-color: #f8f9fa;
+    font-family: Arial, sans-serif;
+}
+
+/* تنسيق الحاوية */
+.container {
+    max-width: 600px;
+    margin: 50px auto;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* تنسيق الأزرار */
+.btn-custom {
+    background-color: #007bff;
+    color: white;
+    transition: 0.3s;
+}
+
+.btn-custom:hover {
+    background-color: #0056b3;
+}
+
+/* تحسين إدخال البيانات */
+input.form-control {
+    border-radius: 5px;
+    border: 1px solid #ced4da;
+    padding: 10px;
+}
+
+/* تأثير تحميل النتائج */
+.loading {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.8);
+    text-align: center;
+    padding-top: 20%;
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #007bff;
+}
+
+/* تحسين جدول النتائج */
+.heatmap td {
+    text-align: center;
+    font-weight: bold;
+}
+
+.low { background-color: #c3e6cb; } /* أخضر */
+.medium { background-color: #ffeeba; } /* أصفر */
+.high { background-color: #f5c6cb; } /* أحمر */
